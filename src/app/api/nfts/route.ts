@@ -6,7 +6,7 @@ import { BlockchainClient } from "@/services/blockchain/viem-client";
  * GET /api/nfts?address=0x...&chainId=480
  *
  * Server-side NFT discovery endpoint.
- * Uses multi-strategy indexing (Alchemy > Worldscan > RPC) to find all
+ * Uses Alchemy first, then Blockscout transfer history as a fallback.
  * ERC-721 and ERC-1155 tokens owned by the given address.
  */
 export async function GET(request: NextRequest) {
@@ -30,13 +30,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const [alchemyNfts, worldscanNfts] = await Promise.all([
-      NFTIndexerService.fetchFromAlchemy(address, chainId),
-      NFTIndexerService.fetchFromWorldscan(address, chainId),
-    ]);
+    const alchemyNfts = await NFTIndexerService.fetchFromAlchemy(address, chainId);
+    const explorerNfts = alchemyNfts.length
+      ? []
+      : await NFTIndexerService.fetchFromExplorer(address, chainId);
 
     const nftsById = new Map<string, (typeof alchemyNfts)[number]>();
-    for (const nft of [...alchemyNfts, ...worldscanNfts]) {
+    for (const nft of [...alchemyNfts, ...explorerNfts]) {
       const key = `${nft.contractAddress.toLowerCase()}-${nft.tokenId}`;
       if (!nftsById.has(key)) {
         nftsById.set(key, nft);

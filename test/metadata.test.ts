@@ -15,6 +15,57 @@ describe("MetadataService", () => {
     expect(resolved).toBe("https://arweave.net/tZq_6oFfTj18_m40u9sK3");
   });
 
+  it("resolves IPFS URIs without duplicating the ipfs path", () => {
+    expect(MetadataService.resolveUri("ipfs://QmHash/metadata.json")).toBe(
+      "https://ipfs.io/ipfs/QmHash/metadata.json"
+    );
+    expect(MetadataService.resolveUri("ipfs://ipfs/QmHash/metadata.json")).toBe(
+      "https://ipfs.io/ipfs/QmHash/metadata.json"
+    );
+  });
+
+  it("preserves existing HTTP IPFS gateway URLs", () => {
+    const pinataUrl = "https://gateway.pinata.cloud/ipfs/QmHash/image.png";
+    expect(MetadataService.resolveUri(pinataUrl)).toBe(pinataUrl);
+  });
+
+  it("expands ERC-1155 token IDs to lowercase 64-character hex", () => {
+    const expanded = MetadataService.expandErc1155Uri(
+      "https://example.com/{id}/{id}.json",
+      "2"
+    );
+    const paddedTwo = `${"0".repeat(63)}2`;
+    expect(expanded).toBe(
+      `https://example.com/${paddedTwo}/${paddedTwo}.json`
+    );
+
+    expect(
+      MetadataService.expandErc1155Uri(
+        "https://example.com/{id}.json",
+        "340282366920938463463374607431768211455"
+      )
+    ).toBe(`https://example.com/${"0".repeat(32)}${"f".repeat(32)}.json`);
+
+    const uriWithoutPlaceholder = "https://example.com/metadata.json";
+    expect(
+      MetadataService.expandErc1155Uri(uriWithoutPlaceholder, "2")
+    ).toBe(uriWithoutPlaceholder);
+  });
+
+  it("returns ordered, deduplicated IPFS image gateway candidates", () => {
+    expect(
+      MetadataService.getImageCandidates("ipfs://QmHash/images/nft.png")
+    ).toEqual([
+      "https://ipfs.io/ipfs/QmHash/images/nft.png",
+      "https://gateway.pinata.cloud/ipfs/QmHash/images/nft.png",
+      "https://dweb.link/ipfs/QmHash/images/nft.png",
+    ]);
+    expect(
+      MetadataService.getImageCandidates("https://example.com/nft.png")
+    ).toEqual(["https://example.com/nft.png"]);
+    expect(MetadataService.getImageCandidates(undefined)).toEqual([]);
+  });
+
   it("should preserve valid HTTPS URLs", () => {
     const httpsUri = "https://images.unsplash.com/photo-123";
     expect(MetadataService.resolveUri(httpsUri)).toBe(httpsUri);

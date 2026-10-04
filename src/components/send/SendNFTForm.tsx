@@ -3,10 +3,9 @@
 import React, { useState } from "react";
 import { NFT } from "@/types/nft";
 import { nftTransferSchema } from "@/utils/validation";
-import { MetadataService } from "@/services/metadata/metadata-service";
-import Image from "next/image";
 import { AlertCircle, ChevronDown } from "lucide-react";
 import { useNFTTransferability } from "@/hooks/useNFTTransferability";
+import { NFTImage } from "@/components/nfts/NFTImage";
 
 interface SendNFTFormProps {
   nfts: NFT[];
@@ -86,8 +85,6 @@ export const SendNFTForm: React.FC<SendNFTFormProps> = ({
     });
   };
 
-  const fallback = MetadataService.getFallbackImage(selectedNFT.tokenId, selectedNFT.name);
-
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* 1. Selected NFT Preview / Selector */}
@@ -104,12 +101,11 @@ export const SendNFTForm: React.FC<SendNFTFormProps> = ({
           >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-[#1A1D27] overflow-hidden relative shrink-0">
-                <Image
-                  src={selectedNFT.imageUrl || fallback}
+                <NFTImage
+                  nft={selectedNFT}
                   alt={selectedNFT.name || "NFT"}
                   fill
                   className="object-cover"
-                  unoptimized
                 />
               </div>
               <div>
@@ -139,12 +135,11 @@ export const SendNFTForm: React.FC<SendNFTFormProps> = ({
                   className="w-full p-2 rounded-xl hover:bg-[#202534] flex items-center gap-2.5 transition-colors text-left cursor-pointer"
                 >
                   <div className="w-8 h-8 rounded-lg overflow-hidden relative bg-slate-800 shrink-0">
-                    <Image
-                      src={item.imageUrl || fallback}
+                    <NFTImage
+                      nft={item}
                       alt={item.name || ""}
                       fill
                       className="object-cover"
-                      unoptimized
                     />
                   </div>
                   <div className="flex-1 truncate">
