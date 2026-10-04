@@ -1,7 +1,8 @@
 import { Transaction, TransactionType } from "@/types/transaction";
+import { getExplorerApiUrl } from "@/config/networks";
 
 /**
- * Worldscan/Etherscan API response types
+ * Blockscout/Etherscan API response types
  */
 interface EtherscanNormalTx {
   hash: string;
@@ -42,10 +43,21 @@ interface EtherscanNFTTx {
   tokenValue?: string; // ERC-1155 quantity
 }
 
+interface EtherscanInternalTx {
+  transactionHash: string;
+  from: string;
+  to: string;
+  value: string;
+  timeStamp: string;
+  blockNumber: string;
+  isError: string;
+  callType: string;
+}
+
 /**
  * Transaction Indexer Service
  *
- * Fetches on-chain transaction history from Worldscan (Etherscan-compatible API)
+ * Fetches on-chain transaction history from Blockscout (Etherscan-compatible API)
  * for both World Chain mainnet and Sepolia testnet.
  *
  * Fetches:
@@ -53,14 +65,9 @@ interface EtherscanNFTTx {
  * 2. ERC-20 token transfers
  * 3. ERC-721 NFT transfers
  * 4. ERC-1155 NFT transfers
+ * 5. Internal ETH transfers
  */
 export class TransactionIndexerService {
-  private static readonly API_URLS: Record<number, string> = {
-    480: "https://api.worldscan.org/api",
-    4801: "https://api-sepolia.worldscan.org/api",
-    10: "https://api-optimistic.etherscan.io/api",
-  };
-
   /**
    * Fetch all transaction types and merge them into a unified history
    */
@@ -69,14 +76,15 @@ export class TransactionIndexerService {
     chainId: number,
     limit: number = 50
   ): Promise<Transaction[]> {
-    const apiUrl = this.API_URLS[chainId];
+    const apiUrl = getExplorerApiUrl(chainId);
     if (!apiUrl) return [];
 
     const address = ownerAddress.toLowerCase();
 
     // Fetch all transaction types in parallel for speed
-    const [ethTxs, erc20Txs, nftTxs, erc1155Txs] = await Promise.all([
+    const [ethTxs, internalTxs, erc20Txs, nftTxs, erc1155Txs] = await Promise.all([
       this.fetchNormalTxs(apiUrl, address, chainId),
+      this.fetchInternalTxs(apiUrl, address, chainId),
       this.fetchErc20Txs(apiUrl, address, chainId),
       this.fetchErc721Txs(apiUrl, address, chainId),
       this.fetchErc1155Txs(apiUrl, address, chainId),
@@ -99,14 +107,14 @@ export class TransactionIndexerService {
       }
     }
 
-    // Add ETH transfers (least specific, skip if hash already covered by ERC-20/NFT)
-    for (const tx of ethTxs) {
-      const key = `${tx.hash}-${tx.type}-ETH`;
-      // Only add if there's no more specific entry for this hash
-      const hasSpecific = Array.from(txMap.keys()).some((k) => k.startsWith(tx.hash));
-      if (!hasSpecific) {
-        txMap.set(key, tx);
-      }
+    // Add ETH transfers last, skipping hashes covered by token/NFT activity.
+    const tokenAndNftHashes = new Set(
+      [...txMap.values()].map((tx) => tx.hash.toLowerCase())
+    );
+    for (const tx of [...ethTxs, ...internalTxs]) {
+      if (tokenAndNftHashes.has(tx.hash.toLowerCase())) continue;
+      const key = `${tx.hash.toLowerCase()}-${tx.type}`;
+      if (!txMap.has(key)) txMap.set(key, tx);
     }
 
     // Sort by timestamp descending and limit
@@ -133,10 +141,10 @@ export class TransactionIndexerService {
       if (!res.ok) return [];
 
       const data = await res.json();
-      if (data.status !== "1" || !Array.isArray(data.result)) return [];
+      if (!Array.isArray(data.result)) return [];
 
       return (data.result as EtherscanNormalTx[])
-        .filter((tx) => tx.value !== "0" || tx.functionName === "") // Only pure ETH transfers
+        .filter((tx) => tx.value !== "0")
         .map((tx) => {
           const isReceive = tx.to.toLowerCase() === address;
           const isError = tx.isError === "1" || tx.txreceipt_status === "0";
@@ -171,6 +179,58 @@ export class TransactionIndexerService {
   }
 
   /**
+   * Fetch internal ETH transfers
+   */
+  private static async fetchInternalTxs(
+    apiUrl: string,
+    address: string,
+    chainId: number
+  ): Promise<Transaction[]> {
+    try {
+      const url = `${apiUrl}?module=account&action=txlistinternal&address=${address}&startblock=0&endblock=99999999&page=1&offset=25&sort=desc`;
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        next: { revalidate: 30 },
+      });
+
+      if (!res.ok) return [];
+
+      const data = await res.json();
+      if (!Array.isArray(data.result)) return [];
+
+      return (data.result as EtherscanInternalTx[])
+        .filter((tx) => tx.value !== "0" && tx.isError !== "1" && tx.callType === "call")
+        .map((tx) => {
+          const isReceive = tx.to.toLowerCase() === address;
+          const valueInEth = Number(BigInt(tx.value)) / 1e18;
+          const formattedAmount =
+            valueInEth < 0.0001
+              ? valueInEth.toExponential(2)
+              : valueInEth < 1
+              ? valueInEth.toFixed(6)
+              : valueInEth.toFixed(4);
+
+          return {
+            hash: tx.transactionHash,
+            type: (isReceive ? "TOKEN_RECEIVE" : "TOKEN_SEND") as TransactionType,
+            status: "CONFIRMED" as const,
+            from: tx.from,
+            to: tx.to,
+            assetSymbol: "ETH",
+            assetName: "Ether",
+            amount: formattedAmount,
+            timestamp: parseInt(tx.timeStamp, 10) * 1000,
+            blockNumber: parseInt(tx.blockNumber, 10),
+            chainId,
+          } as Transaction;
+        });
+    } catch (err) {
+      console.warn("Failed to fetch internal txs:", err);
+      return [];
+    }
+  }
+
+  /**
    * Fetch ERC-20 token transfers
    */
   private static async fetchErc20Txs(
@@ -188,7 +248,7 @@ export class TransactionIndexerService {
       if (!res.ok) return [];
 
       const data = await res.json();
-      if (data.status !== "1" || !Array.isArray(data.result)) return [];
+      if (!Array.isArray(data.result)) return [];
 
       return (data.result as EtherscanErc20Tx[]).map((tx) => {
         const isReceive = tx.to.toLowerCase() === address;
@@ -244,7 +304,7 @@ export class TransactionIndexerService {
       if (!res.ok) return [];
 
       const data = await res.json();
-      if (data.status !== "1" || !Array.isArray(data.result)) return [];
+      if (!Array.isArray(data.result)) return [];
 
       return (data.result as EtherscanNFTTx[]).map((tx) => {
         const isReceive = tx.to.toLowerCase() === address;
@@ -289,7 +349,7 @@ export class TransactionIndexerService {
       if (!res.ok) return [];
 
       const data = await res.json();
-      if (data.status !== "1" || !Array.isArray(data.result)) return [];
+      if (!Array.isArray(data.result)) return [];
 
       return (data.result as EtherscanNFTTx[]).map((tx) => {
         const isReceive = tx.to.toLowerCase() === address;

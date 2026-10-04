@@ -206,15 +206,17 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
         </div>
 
         {/* View on Explorer Link */}
-        <a
-          href={explorerUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="w-full py-3 rounded-2xl bg-[#161922] hover:bg-[#202534] border border-[#22283A] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
-        >
-          <span>View on {chain.blockExplorers.default.name}</span>
-          <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-        </a>
+        {!tx.hashKind && (
+          <a
+            href={explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-3 rounded-2xl bg-[#161922] hover:bg-[#202534] border border-[#22283A] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
+          >
+            <span>View on {chain.blockExplorers.default.name}</span>
+            <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+          </a>
+        )}
       </div>
     </Modal>
   );

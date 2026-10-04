@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { WalletAccount } from "@/types/wallet";
+import { SendTransactionResult, WalletAccount } from "@/types/wallet";
 import { Token } from "@/types/token";
 import { NFT } from "@/types/nft";
 import { Transaction } from "@/types/transaction";
@@ -12,6 +12,7 @@ import { useDemoMode } from "./DemoModeContext";
 import { useNetwork } from "./NetworkContext";
 import { BlockchainClient } from "@/services/blockchain/viem-client";
 import { NFTTransferabilityService } from "@/services/nfts/nft-transferability";
+import { UserOperationService, UserOpResolution } from "@/services/world/user-operation";
 
 interface WalletContextType {
   account: WalletAccount | null;
@@ -223,11 +224,77 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setRecentTransactions((prev) => [tx, ...prev]);
   }, []);
 
-  const updateTransactionStatus = useCallback((hash: string, status: "PENDING" | "CONFIRMED" | "FAILED", errorMessage?: string) => {
+  const patchTransaction = useCallback((hash: string, patch: Partial<Transaction>) => {
     setRecentTransactions((prev) =>
-      prev.map((tx) => (tx.hash === hash ? { ...tx, status, errorMessage } : tx))
+      prev.map((tx) => (tx.hash === hash ? { ...tx, ...patch } : tx))
     );
   }, []);
+
+  const resolveMiniKitResult = useCallback(
+    async (
+      placeholderHash: string,
+      result: SendTransactionResult,
+      rejectedMessage: string
+    ): Promise<{ success: boolean; hash?: string; error?: string }> => {
+      if (result.success && result.transactionHash) {
+        patchTransaction(placeholderHash, {
+          hash: result.transactionHash,
+          hashKind: undefined,
+          status: "CONFIRMED",
+        });
+        return { success: true, hash: result.transactionHash };
+      }
+
+      if (!result.success || !result.userOpHash) {
+        const error = result.error || rejectedMessage;
+        patchTransaction(placeholderHash, { status: "FAILED", errorMessage: error });
+        return { success: false, error };
+      }
+
+      const userOpHash = result.userOpHash;
+      patchTransaction(placeholderHash, {
+        hash: userOpHash,
+        hashKind: "userOp",
+        userOpHash,
+        status: "PENDING",
+      });
+
+      const applyResolution = (resolution: UserOpResolution) => {
+        if (resolution.status === "success") {
+          patchTransaction(userOpHash, {
+            hash: resolution.transactionHash,
+            hashKind: undefined,
+            status: "CONFIRMED",
+          });
+          return { success: true as const, hash: resolution.transactionHash };
+        }
+
+        if (resolution.status === "failed") {
+          patchTransaction(userOpHash, {
+            status: "FAILED",
+            errorMessage: "Transaction reverted on-chain",
+            ...(resolution.transactionHash
+              ? { hash: resolution.transactionHash, hashKind: undefined }
+              : {}),
+          });
+          return { success: false as const, error: "Transaction reverted on-chain" };
+        }
+
+        return { success: true as const };
+      };
+
+      const resolution = await UserOperationService.waitForTransactionHash(userOpHash);
+      if (resolution.status !== "timeout") {
+        return applyResolution(resolution);
+      }
+
+      void UserOperationService.waitForTransactionHash(userOpHash, { timeoutMs: 300_000 })
+        .then(applyResolution)
+        .catch(() => {});
+      return { success: true };
+    },
+    [patchTransaction]
+  );
 
   const clearRecentTransactions = useCallback(() => {
     setRecentTransactions([]);
@@ -263,6 +330,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Register as pending in local transactions
       const newTx: Transaction = {
         hash: txHash,
+        ...(!demoMode ? { hashKind: "placeholder" as const } : {}),
         type: "TOKEN_SEND",
         status: "PENDING",
         from: account.address,
@@ -281,7 +349,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (demoMode) {
         return new Promise((resolve) => {
           setTimeout(() => {
-            updateTransactionStatus(txHash, "CONFIRMED");
+            patchTransaction(txHash, { status: "CONFIRMED" });
             resolve({ success: true, hash: txHash });
           }, 2000);
         });
@@ -302,14 +370,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             ],
           });
 
-          if (result.success && result.transactionHash) {
-            updateTransactionStatus(txHash, "CONFIRMED");
-            return { success: true, hash: result.transactionHash };
-          } else {
-            const errMsg = result.error || "Transaction was rejected in World App";
-            updateTransactionStatus(txHash, "FAILED", errMsg);
-            return { success: false, error: errMsg };
-          }
+          return resolveMiniKitResult(txHash, result, "Transaction was rejected in World App");
         } else {
           // ERC-20 via Permit2 AllowanceTransfer so MiniKit does not call the
           // token contract as an entrypoint (avoids invalid_contract).
@@ -340,22 +401,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             ],
           });
 
-          if (result.success && result.transactionHash) {
-            updateTransactionStatus(txHash, "CONFIRMED");
-            return { success: true, hash: result.transactionHash };
-          } else {
-            const errMsg = result.error || "Transaction was rejected in World App";
-            updateTransactionStatus(txHash, "FAILED", errMsg);
-            return { success: false, error: errMsg };
-          }
+          return resolveMiniKitResult(txHash, result, "Transaction was rejected in World App");
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : "Blockchain execution error";
-        updateTransactionStatus(txHash, "FAILED", errMsg);
+        patchTransaction(txHash, { status: "FAILED", errorMessage: errMsg });
         return { success: false, error: errMsg };
       }
     },
-    [account, chainId, demoMode, addLocalTransaction, updateTransactionStatus]
+    [account, chainId, demoMode, addLocalTransaction, patchTransaction, resolveMiniKitResult]
   );
 
   /**
@@ -384,6 +438,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Register as pending
       const newTx: Transaction = {
         hash: txHash,
+        ...(!demoMode ? { hashKind: "placeholder" as const } : {}),
         type: "NFT_SEND",
         status: "PENDING",
         from: account.address,
@@ -403,7 +458,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (demoMode) {
         return new Promise((resolve) => {
           setTimeout(() => {
-            updateTransactionStatus(txHash, "CONFIRMED");
+            patchTransaction(txHash, { status: "CONFIRMED" });
             resolve({ success: true, hash: txHash });
           }, 2000);
         });
@@ -420,7 +475,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
 
         if (preflight.status === "non_transferable") {
-          updateTransactionStatus(txHash, "FAILED", preflight.reason);
+          patchTransaction(txHash, { status: "FAILED", errorMessage: preflight.reason });
           return { success: false, error: preflight.reason };
         }
 
@@ -451,21 +506,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ],
         });
 
-        if (result.success && result.transactionHash) {
-          updateTransactionStatus(txHash, "CONFIRMED");
-          return { success: true, hash: result.transactionHash };
-        } else {
-          const errMsg = result.error || "NFT Transfer was rejected in World App";
-          updateTransactionStatus(txHash, "FAILED", errMsg);
-          return { success: false, error: errMsg };
-        }
+        return resolveMiniKitResult(txHash, result, "NFT Transfer was rejected in World App");
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : "NFT transfer execution failed";
-        updateTransactionStatus(txHash, "FAILED", errMsg);
+        patchTransaction(txHash, { status: "FAILED", errorMessage: errMsg });
         return { success: false, error: errMsg };
       }
     },
-    [account, chainId, demoMode, addLocalTransaction, updateTransactionStatus]
+    [account, chainId, demoMode, addLocalTransaction, patchTransaction, resolveMiniKitResult]
   );
 
   return (

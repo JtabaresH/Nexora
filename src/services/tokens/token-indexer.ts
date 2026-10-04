@@ -1,5 +1,5 @@
 import { BlockchainClient } from "../blockchain/viem-client";
-import { getNetworkConfig } from "@/config/networks";
+import { getExplorerApiUrl, getNetworkConfig } from "@/config/networks";
 
 export interface DiscoveredToken {
   address: string;
@@ -19,15 +19,9 @@ interface AlchemyTokenBalance {
 
 /**
  * Discovers every ERC-20 the wallet currently holds, including tokens
- * created inside World App, using Alchemy balances + Worldscan transfers.
+ * created inside World App, using Alchemy balances + explorer transfers.
  */
 export class TokenIndexerService {
-  private static readonly WORLDSCAN_API_URLS: Record<number, string> = {
-    480: "https://api.worldscan.org/api",
-    4801: "https://api-sepolia.worldscan.org/api",
-    10: "https://api-optimistic.etherscan.io/api",
-  };
-
   static async fetchHeldTokens(
     ownerAddress: string,
     chainId: number
@@ -37,7 +31,7 @@ export class TokenIndexerService {
     const fromAlchemy = await this.fetchFromAlchemy(ownerAddress, chainId);
     if (fromAlchemy.length > 0) return fromAlchemy;
 
-    return this.fetchFromWorldscan(ownerAddress, chainId);
+    return this.fetchFromExplorer(ownerAddress, chainId);
   }
 
   private static async fetchFromAlchemy(
@@ -74,7 +68,7 @@ export class TokenIndexerService {
       });
 
       const discovered = await Promise.all(
-        held.slice(0, 80).map(async (item) => {
+        held.slice(0, 80).map(async (item): Promise<DiscoveredToken | null> => {
           const metadata = await BlockchainClient.getErc20Metadata(
             item.contractAddress,
             chainId
@@ -100,11 +94,11 @@ export class TokenIndexerService {
     }
   }
 
-  private static async fetchFromWorldscan(
+  private static async fetchFromExplorer(
     ownerAddress: string,
     chainId: number
   ): Promise<DiscoveredToken[]> {
-    const apiUrl = this.WORLDSCAN_API_URLS[chainId];
+    const apiUrl = getExplorerApiUrl(chainId);
     if (!apiUrl) return [];
 
     try {
@@ -115,7 +109,7 @@ export class TokenIndexerService {
       if (!res.ok) return [];
 
       const data = await res.json();
-      if (data.status !== "1" || !Array.isArray(data.result)) return [];
+      if (!Array.isArray(data.result)) return [];
 
       const unique = new Map<
         string,
@@ -136,7 +130,7 @@ export class TokenIndexerService {
       const discovered = await Promise.all(
         Array.from(unique.values())
           .slice(0, 80)
-          .map(async (info) => {
+          .map(async (info): Promise<DiscoveredToken | null> => {
             const balance = await BlockchainClient.getErc20Balance(
               info.address,
               ownerAddress,
@@ -158,7 +152,7 @@ export class TokenIndexerService {
 
       return discovered.filter((token): token is DiscoveredToken => token !== null);
     } catch (err) {
-      console.warn("Worldscan token discovery failed:", err);
+      console.warn("Explorer token discovery failed:", err);
       return [];
     }
   }

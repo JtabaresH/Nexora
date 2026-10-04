@@ -77,11 +77,21 @@ export const SUPPORTED_NETWORKS: Record<SupportedChainId, ChainConfig> = {
 
 export const DEFAULT_CHAIN_ID: SupportedChainId = 480;
 
+const EXPLORER_API_URLS: Record<SupportedChainId, string> = {
+  480: "https://worldchain-mainnet.explorer.alchemy.com/api",
+  4801: "https://worldchain-sepolia.explorer.alchemy.com/api",
+  10: "https://explorer.optimism.io/api",
+};
+
 export function getNetworkConfig(chainId: number): ChainConfig {
   if (chainId in SUPPORTED_NETWORKS) {
     return SUPPORTED_NETWORKS[chainId as SupportedChainId];
   }
   return WORLD_CHAIN_MAINNET;
+}
+
+export function getExplorerApiUrl(chainId: number): string | undefined {
+  return EXPLORER_API_URLS[chainId as SupportedChainId];
 }
 
 export function getExplorerTxUrl(chainId: number, hash: string): string {

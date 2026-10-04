@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { BlockchainClient } from "@/services/blockchain/viem-client";
-import { getNetworkConfig, getExplorerTxUrl } from "@/config/networks";
+import { getExplorerTxUrl } from "@/config/networks";
 import { useNetwork } from "@/context/NetworkContext";
 import confetti from "canvas-confetti";
 import {
@@ -49,8 +49,8 @@ export const ConfirmTransactionModal: React.FC<ConfirmTransactionProps> = ({
 
     const result = await onConfirm();
 
-    if (result.success && result.hash) {
-      setTxHash(result.hash);
+    if (result.success) {
+      setTxHash(result.hash || null);
       setStatus("SUCCESS");
       try {
         confetti({
@@ -89,10 +89,18 @@ export const ConfirmTransactionModal: React.FC<ConfirmTransactionProps> = ({
           <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-4 border border-emerald-500/30">
             <CheckCircle2 className="w-8 h-8" />
           </div>
-          <h3 className="text-base font-bold text-white mb-1">Transaction confirmed</h3>
-          <p className="text-xs text-slate-400 max-w-xs mb-4">
-            Successfully transferred {amountOrQuantity} {assetTitle} to {BlockchainClient.truncateAddress(recipient)}.
-          </p>
+          <h3 className="text-base font-bold text-white mb-1">
+            {txHash ? "Transaction confirmed" : "Transaction submitted"}
+          </h3>
+          {txHash ? (
+            <p className="text-xs text-slate-400 max-w-xs mb-4">
+              Successfully transferred {amountOrQuantity} {assetTitle} to {BlockchainClient.truncateAddress(recipient)}.
+            </p>
+          ) : (
+            <p className="text-xs text-slate-400 max-w-xs mb-4">
+              Submitted — confirmation pending, check Activity.
+            </p>
+          )}
 
           {txHash && (
             <a

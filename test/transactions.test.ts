@@ -1,15 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { TransactionIndexerService } from "../src/services/transactions/tx-indexer";
+import { getExplorerApiUrl } from "../src/config/networks";
 
 describe("TransactionIndexerService", () => {
   describe("API URL mapping", () => {
-    it("has correct Worldscan API URLs for supported chains", () => {
-      // Access private static API_URLS via any cast for testing
-      const urls = (TransactionIndexerService as unknown as { API_URLS: Record<number, string> }).API_URLS;
-
-      expect(urls[480]).toBe("https://api.worldscan.org/api");
-      expect(urls[4801]).toBe("https://api-sepolia.worldscan.org/api");
-      expect(urls[10]).toBe("https://api-optimistic.etherscan.io/api");
+    it("has correct Blockscout API URLs for supported chains", () => {
+      expect(getExplorerApiUrl(480)).toBe("https://worldchain-mainnet.explorer.alchemy.com/api");
+      expect(getExplorerApiUrl(4801)).toBe("https://worldchain-sepolia.explorer.alchemy.com/api");
+      expect(getExplorerApiUrl(10)).toBe("https://explorer.optimism.io/api");
     });
   });
 

@@ -26,6 +26,7 @@ export interface SendTransactionRequest {
 export interface SendTransactionResult {
   success: boolean;
   transactionHash?: string;
+  userOpHash?: string;
   error?: string;
 }
 

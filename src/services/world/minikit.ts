@@ -210,10 +210,10 @@ export class WorldMiniKitService {
       });
 
       // Official MiniKit sendTransaction — do not replace this command
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response = await MiniKit.sendTransaction({
         transactions: formattedTxs,
         chainId: request.chainId || 480,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
 
       if (!response) {
@@ -235,8 +235,23 @@ export class WorldMiniKitService {
           txHash?: string;
           userOpHash?: string;
         } | undefined;
-        const hash = txData?.transactionHash || txData?.txHash || txData?.userOpHash;
 
+        if (response.executedWith === "minikit") {
+          const transactionHash = txData?.transactionHash || txData?.txHash;
+          if (transactionHash) {
+            return { success: true, transactionHash };
+          }
+          if (txData?.userOpHash) {
+            return { success: true, userOpHash: txData.userOpHash };
+          }
+
+          return {
+            success: false,
+            error: "World App did not return a transaction hash.",
+          };
+        }
+
+        const hash = txData?.transactionHash || txData?.txHash || txData?.userOpHash;
         if (!hash) {
           return {
             success: false,

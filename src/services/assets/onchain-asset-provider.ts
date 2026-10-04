@@ -36,6 +36,7 @@ export class OnChainAssetProvider implements AssetProvider {
         decimals: token.decimals,
         logoUrl: token.logoUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${token.symbol}`,
         chainId,
+        isNative: false,
       }));
 
     const mergedConfigs = [...allConfigs, ...discoveredConfigs];
