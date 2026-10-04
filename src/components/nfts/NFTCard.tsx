@@ -3,8 +3,9 @@
 import React, { useState } from "react";
 import { NFT } from "@/types/nft";
 import Image from "next/image";
-import { Send, Eye, Sparkles } from "lucide-react";
+import { Send, Eye, Lock } from "lucide-react";
 import { MetadataService } from "@/services/metadata/metadata-service";
+import { useNFTTransferability } from "@/hooks/useNFTTransferability";
 
 interface NFTCardProps {
   nft: NFT;
@@ -18,6 +19,8 @@ export const NFTCard: React.FC<NFTCardProps> = ({
   onSend,
 }) => {
   const [imageError, setImageError] = useState(false);
+  const { transferability } = useNFTTransferability(nft);
+  const nonTransferable = transferability.status === "non_transferable";
 
   const fallback = MetadataService.getFallbackImage(nft.tokenId, nft.name);
   const displayImage = imageError || !nft.imageUrl ? fallback : nft.imageUrl;
@@ -43,6 +46,12 @@ export const NFTCard: React.FC<NFTCardProps> = ({
         <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md text-[10px] font-bold text-white border border-white/10">
           <span>{nft.standard}</span>
         </div>
+        {nonTransferable && (
+          <div className="absolute bottom-2 left-2 flex items-center gap-1 px-2 py-1 rounded-full bg-amber-950/85 text-[10px] font-semibold text-amber-200 border border-amber-800/50">
+            <Lock className="w-3 h-3" />
+            <span>Non-transferable</span>
+          </div>
+        )}
 
         {/* Quantity Badge for ERC-1155 */}
         {nft.standard === "ERC1155" && nft.quantity && (
@@ -82,7 +91,13 @@ export const NFTCard: React.FC<NFTCardProps> = ({
           <button
             onClick={() => onSend(nft)}
             type="button"
-            className="py-1.5 px-2 rounded-xl bg-[#00F293]/10 hover:bg-[#00F293]/20 text-[#00F293] text-xs font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer"
+            disabled={nonTransferable}
+            title={nonTransferable ? transferability.reason : undefined}
+            className={`py-1.5 px-2 rounded-xl bg-[#00F293]/10 text-[#00F293] text-xs font-medium flex items-center justify-center gap-1 transition-colors ${
+              nonTransferable
+                ? "opacity-40 cursor-not-allowed"
+                : "hover:bg-[#00F293]/20 cursor-pointer"
+            }`}
           >
             <Send className="w-3.5 h-3.5" />
             <span>Send</span>
