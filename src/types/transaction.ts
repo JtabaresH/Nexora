@@ -8,6 +8,8 @@ export type TransactionStatus = "PENDING" | "CONFIRMED" | "FAILED";
 
 export interface Transaction {
   hash: string;
+  hashKind?: "placeholder" | "userOp";
+  userOpHash?: string;
   type: TransactionType;
   status: TransactionStatus;
   from: string;
