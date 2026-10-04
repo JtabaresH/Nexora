@@ -11,6 +11,7 @@ import { PERMIT2_ADDRESS } from "@/contracts/abis/permit2";
 import { useDemoMode } from "./DemoModeContext";
 import { useNetwork } from "./NetworkContext";
 import { BlockchainClient } from "@/services/blockchain/viem-client";
+import { NFTTransferabilityService } from "@/services/nfts/nft-transferability";
 
 interface WalletContextType {
   account: WalletAccount | null;
@@ -410,6 +411,19 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       // Live World App execution via MiniKit sendTransaction
       try {
+        const preflight = await NFTTransferabilityService.simulateTransfer({
+          nft,
+          from: account.address,
+          to: recipient,
+          quantity,
+          chainId,
+        });
+
+        if (preflight.status === "non_transferable") {
+          updateTransactionStatus(txHash, "FAILED", preflight.reason);
+          return { success: false, error: preflight.reason };
+        }
+
         let calldata: `0x${string}`;
 
         if (nft.standard === "ERC721") {

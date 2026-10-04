@@ -6,6 +6,7 @@ import { nftTransferSchema } from "@/utils/validation";
 import { MetadataService } from "@/services/metadata/metadata-service";
 import Image from "next/image";
 import { AlertCircle, ChevronDown } from "lucide-react";
+import { useNFTTransferability } from "@/hooks/useNFTTransferability";
 
 interface SendNFTFormProps {
   nfts: NFT[];
@@ -30,6 +31,10 @@ export const SendNFTForm: React.FC<SendNFTFormProps> = ({
   const [quantity, setQuantity] = useState<string>("1");
   const [error, setError] = useState<string | null>(null);
 
+  const { transferability } = useNFTTransferability(
+    selectedNFT.contractAddress ? selectedNFT : undefined
+  );
+  const nonTransferable = transferability.status === "non_transferable";
   const is1155 = selectedNFT.standard === "ERC1155";
   const maxQuantity = Number(selectedNFT.quantity || BigInt(1));
 
@@ -48,6 +53,8 @@ export const SendNFTForm: React.FC<SendNFTFormProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (nonTransferable) return;
 
     const numQuantity = is1155 ? parseInt(quantity, 10) : 1;
 
@@ -218,10 +225,19 @@ export const SendNFTForm: React.FC<SendNFTFormProps> = ({
         </div>
       )}
 
+      {nonTransferable && (
+        <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-900/40 text-amber-200 text-xs">
+          {transferability.reason}
+        </div>
+      )}
+
       {/* Submit Button */}
       <button
         type="submit"
-        className="w-full py-3.5 rounded-2xl world-glow-btn text-sm font-bold cursor-pointer mt-4"
+        disabled={nonTransferable}
+        className={`w-full py-3.5 rounded-2xl world-glow-btn text-sm font-bold mt-4 ${
+          nonTransferable ? "opacity-40 cursor-not-allowed" : "cursor-pointer"
+        }`}
       >
         Review Transfer
       </button>

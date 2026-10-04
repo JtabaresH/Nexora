@@ -8,6 +8,7 @@ import { BlockchainClient } from "@/services/blockchain/viem-client";
 import { getNetworkConfig } from "@/config/networks";
 import Image from "next/image";
 import { Send, Copy, Check, ExternalLink, ShieldCheck } from "lucide-react";
+import { useNFTTransferability } from "@/hooks/useNFTTransferability";
 
 interface NFTDetailModalProps {
   nft: NFT | null;
@@ -25,9 +26,11 @@ export const NFTDetailModal: React.FC<NFTDetailModalProps> = ({
   const [copiedContract, setCopiedContract] = useState(false);
   const [copiedOwner, setCopiedOwner] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const { transferability } = useNFTTransferability(nft ?? undefined);
 
   if (!nft) return null;
 
+  const nonTransferable = transferability.status === "non_transferable";
   const chain = getNetworkConfig(nft.chainId);
   const fallback = MetadataService.getFallbackImage(nft.tokenId, nft.name);
   const displayImage = imgError || !nft.imageUrl ? fallback : nft.imageUrl;
@@ -181,6 +184,12 @@ export const NFTDetailModal: React.FC<NFTDetailModalProps> = ({
           </div>
         </div>
 
+        {nonTransferable && (
+          <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-900/40 text-amber-200 text-xs">
+            {transferability.reason}
+          </div>
+        )}
+
         {/* Send Action Button */}
         <button
           onClick={() => {
@@ -188,7 +197,10 @@ export const NFTDetailModal: React.FC<NFTDetailModalProps> = ({
             onSend(nft);
           }}
           type="button"
-          className="w-full py-3.5 rounded-2xl world-glow-btn flex items-center justify-center gap-2 text-sm font-bold cursor-pointer"
+          disabled={nonTransferable}
+          className={`w-full py-3.5 rounded-2xl world-glow-btn flex items-center justify-center gap-2 text-sm font-bold ${
+            nonTransferable ? "opacity-40 cursor-not-allowed" : "cursor-pointer"
+          }`}
         >
           <Send className="w-4 h-4 stroke-[2.2]" />
           <span>Send NFT</span>
