@@ -30,13 +30,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Strategy 1: Try Alchemy NFT API first (fastest, most comprehensive)
-    let nfts = await NFTIndexerService.fetchFromAlchemy(address, chainId);
+    const [alchemyNfts, worldscanNfts] = await Promise.all([
+      NFTIndexerService.fetchFromAlchemy(address, chainId),
+      NFTIndexerService.fetchFromWorldscan(address, chainId),
+    ]);
 
-    // Strategy 2: Fallback to Worldscan transfer event indexing
-    if (nfts.length === 0) {
-      nfts = await NFTIndexerService.fetchFromWorldscan(address, chainId);
+    const nftsById = new Map<string, (typeof alchemyNfts)[number]>();
+    for (const nft of [...alchemyNfts, ...worldscanNfts]) {
+      const key = `${nft.contractAddress.toLowerCase()}-${nft.tokenId}`;
+      if (!nftsById.has(key)) {
+        nftsById.set(key, nft);
+      }
     }
+    const nfts = Array.from(nftsById.values());
 
     // Serialize BigInt values for JSON transport
     const serializedNfts = nfts.map((nft) => ({

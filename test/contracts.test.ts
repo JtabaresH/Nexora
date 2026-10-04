@@ -29,6 +29,21 @@ describe("Smart Contract Calldata Encoder", () => {
     expect(calldata.startsWith("0xf242432a")).toBe(true);
   });
 
+  it("should encode Permit2 approve and transferFrom calldata", () => {
+    const token = "0x2cFc85d8E48F8EAB294be644d9E25C3030863003";
+    const amount = BigInt("1000000000000000000");
+    const approveData = ContractEncoder.encodePermit2Approve(token, sender, amount);
+    const transferData = ContractEncoder.encodePermit2TransferFrom(
+      sender,
+      recipient,
+      amount,
+      token
+    );
+
+    expect(approveData.startsWith("0x87517c45")).toBe(true);
+    expect(transferData.startsWith("0x36c78516")).toBe(true);
+  });
+
   it("should throw an error when encoding with invalid addresses", () => {
     expect(() => {
       ContractEncoder.encodeErc20Transfer("invalid", BigInt(100));

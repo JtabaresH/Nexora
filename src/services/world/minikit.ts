@@ -4,6 +4,9 @@ import { ENV } from "@/config/env";
 import { createSiweMessage } from "viem/siwe";
 import { privateKeyToAccount } from "viem/accounts";
 
+const INVALID_CONTRACT_HELP =
+  "World App blocked this call (invalid_contract). Add Permit2 (0x000000000022D473030F116dDEE9F6B43aC78BA3) as a Contract Entrypoint, add ERC-20s under Permit2 Tokens, and add NFT contracts under Contract Entrypoints in Developer Portal → Mini App → Permissions.";
+
 export class WorldMiniKitService {
   private static isInitialized = false;
 
@@ -188,11 +191,8 @@ export class WorldMiniKitService {
     }
 
     try {
-      // Build transactions with both raw calldata AND ABI info.
-      // World App uses abi/functionName/args to display human-readable details
-      // in its confirmation popup, while using raw data for execution.
+      // MiniKit v2 sendTransaction expects pre-encoded calldata: { to, data, value }
       const formattedTxs = request.transactions.map((tx) => {
-        // MiniKit requires value as a hex string (0x-prefixed)
         let hexValue = "0x0";
         if (tx.value) {
           const bigVal = typeof tx.value === "string" ? BigInt(tx.value) : tx.value;
@@ -201,33 +201,19 @@ export class WorldMiniKitService {
           }
         }
 
-        // CalldataTransaction v2 uses 'to' (not 'address')
-        // Include ABI fields as supplementary info for World App display
-        const formattedTx: Record<string, unknown> = {
+        return {
           to: tx.address,
+          address: tx.address,
           data: tx.data || "0x",
           value: hexValue,
         };
-
-        // Include ABI info for World App popup display
-        if (tx.abi) {
-          formattedTx.abi = tx.abi;
-        }
-        if (tx.functionName) {
-          formattedTx.functionName = tx.functionName;
-        }
-        if (tx.args) {
-          formattedTx.args = tx.args;
-        }
-
-        return formattedTx;
       });
 
-      // Official MiniKit sendTransaction
+      // Official MiniKit sendTransaction — do not replace this command
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response = await MiniKit.sendTransaction({
         transactions: formattedTxs,
-        chainId: request.chainId,
+        chainId: request.chainId || 480,
       } as any);
 
       if (!response) {
@@ -237,14 +223,30 @@ export class WorldMiniKitService {
         };
       }
 
-      // Check response structure
-      if (response.executedWith === "minikit") {
-        const txData = response.data as { transactionHash?: string; status?: string; txHash?: string } | undefined;
-        const hash = txData?.transactionHash || txData?.txHash;
+      const errorFromResponse = this.readMiniKitError(response);
+      if (errorFromResponse) {
+        return { success: false, error: errorFromResponse };
+      }
+
+      if (response.executedWith === "minikit" || response.executedWith === "wagmi") {
+        const txData = response.data as {
+          transactionHash?: string;
+          status?: string;
+          txHash?: string;
+          userOpHash?: string;
+        } | undefined;
+        const hash = txData?.transactionHash || txData?.txHash || txData?.userOpHash;
+
+        if (!hash) {
+          return {
+            success: false,
+            error: "World App did not return a transaction hash.",
+          };
+        }
 
         return {
           success: true,
-          transactionHash: hash || `0x${Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("")}`,
+          transactionHash: hash,
         };
       }
 
@@ -253,11 +255,50 @@ export class WorldMiniKitService {
         error: "Transaction was not processed by MiniKit bridge.",
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Unknown error during World App transaction";
       return {
         success: false,
-        error: message,
+        error: this.readMiniKitError(err) || "Unknown error during World App transaction",
       };
     }
+  }
+
+  private static readMiniKitError(source: unknown): string | null {
+    if (!source) return null;
+
+    const collect = (value: unknown): string[] => {
+      if (!value) return [];
+      if (typeof value === "string") return [value];
+      if (value instanceof Error) return [value.message, value.name];
+      if (typeof value !== "object") return [];
+
+      const record = value as Record<string, unknown>;
+      return [
+        record.error,
+        record.error_code,
+        record.code,
+        record.message,
+        record.status,
+        record.errorCode,
+        record.data && typeof record.data === "object"
+          ? [
+              (record.data as Record<string, unknown>).error,
+              (record.data as Record<string, unknown>).error_code,
+              (record.data as Record<string, unknown>).code,
+              (record.data as Record<string, unknown>).message,
+            ]
+          : null,
+      ].flatMap((item) => collect(item));
+    };
+
+    const parts = collect(source).filter(Boolean);
+    if (parts.length === 0) return null;
+
+    const joined = parts.join(" ");
+    if (/invalid_contract/i.test(joined)) {
+      return INVALID_CONTRACT_HELP;
+    }
+
+    const first = parts.find((part) => part !== "error" && part !== "success") || parts[0];
+    return first;
   }
 }

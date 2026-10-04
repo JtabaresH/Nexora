@@ -5,6 +5,7 @@ import { useWallet } from "@/context/WalletContext";
 import { useDemoMode } from "@/context/DemoModeContext";
 import { useNetwork } from "@/context/NetworkContext";
 import { BlockchainClient } from "@/services/blockchain/viem-client";
+import { getWorldChainPermit2Tokens, getWorldPortalAllowlistText, WORLD_PERMIT2_ADDRESS } from "@/config/contracts";
 import {
   Sparkles,
   Globe,
@@ -30,6 +31,7 @@ export const SettingsView: React.FC = () => {
   const { demoMode, toggleDemoMode } = useDemoMode();
   const { currentChain, supportedNetworks, chainId, switchNetwork } = useNetwork();
   const [copied, setCopied] = useState(false);
+  const [copiedAllowlist, setCopiedAllowlist] = useState(false);
 
   const address = account?.address || "0x0000000000000000000000000000000000000000";
 
@@ -61,11 +63,10 @@ export const SettingsView: React.FC = () => {
               <div className="font-semibold text-sm text-white flex items-center gap-2">
                 <span>Demo Mode</span>
                 <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    demoMode
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${demoMode
                       ? "bg-amber-400/20 text-amber-300"
                       : "bg-slate-800 text-slate-400"
-                  }`}
+                    }`}
                 >
                   {demoMode ? "ACTIVE" : "OFF"}
                 </span>
@@ -80,14 +81,12 @@ export const SettingsView: React.FC = () => {
           <button
             onClick={toggleDemoMode}
             type="button"
-            className={`w-12 h-6 rounded-full p-1 transition-colors cursor-pointer relative ${
-              demoMode ? "bg-[#00F293]" : "bg-slate-700"
-            }`}
+            className={`w-12 h-6 rounded-full p-1 transition-colors cursor-pointer relative ${demoMode ? "bg-[#00F293]" : "bg-slate-700"
+              }`}
           >
             <div
-              className={`w-4 h-4 rounded-full bg-[#06070A] transition-transform ${
-                demoMode ? "translate-x-6" : "translate-x-0"
-              }`}
+              className={`w-4 h-4 rounded-full bg-[#06070A] transition-transform ${demoMode ? "translate-x-6" : "translate-x-0"
+                }`}
             />
           </button>
         </div>
@@ -109,17 +108,15 @@ export const SettingsView: React.FC = () => {
                 key={net.id}
                 onClick={() => switchNetwork(net.id as 480 | 4801 | 10)}
                 type="button"
-                className={`w-full p-3 rounded-2xl flex items-center justify-between border transition-all cursor-pointer ${
-                  isSelected
+                className={`w-full p-3 rounded-2xl flex items-center justify-between border transition-all cursor-pointer ${isSelected
                     ? "bg-[#181C26] border-[#00F293]/40"
                     : "bg-[#141722] border-[#1E2333] hover:border-slate-700"
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-2.5">
                   <div
-                    className={`w-2.5 h-2.5 rounded-full ${
-                      net.testnet ? "bg-amber-400" : "bg-[#00F293]"
-                    }`}
+                    className={`w-2.5 h-2.5 rounded-full ${net.testnet ? "bg-amber-400" : "bg-[#00F293]"
+                      }`}
                   />
                   <div className="text-left">
                     <span className="text-xs font-semibold text-white block">
@@ -181,18 +178,54 @@ export const SettingsView: React.FC = () => {
               <span>{account?.isWorldIdVerified ? "Verified Orb" : "Unverified"}</span>
             </span>
           </div>
-          <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#141722]">
-            <span className="text-slate-400">App ID</span>
-            <span className="font-mono text-slate-300 text-[11px]">app_58fcaf4e2...</span>
+        </div>
+      </div>
+
+      <div className="p-4 rounded-3xl bg-[#12141A] border border-[#1E2230] shadow-sm">
+        <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+          World App Transfer Permissions
+        </h3>
+        <p className="text-xs text-slate-400 mb-3">
+          `invalid_contract` is blocked by World App, not by Nexora. Add these addresses in Developer Portal → your Mini App → Permissions, then retry sendTransaction.
+        </p>
+        <div className="space-y-2 text-xs">
+          <div className="p-2.5 rounded-xl bg-[#141722] text-slate-300">
+            <div className="text-slate-500 mb-1">1. Contract Entrypoint — Permit2</div>
+            <span className="font-mono break-all">{WORLD_PERMIT2_ADDRESS}</span>
           </div>
-          <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#141722]">
-            <span className="text-slate-400">RP ID</span>
-            <span className="font-mono text-slate-300 text-[11px]">rp_5b67fb974...</span>
+          <div className="p-2.5 rounded-xl bg-[#141722] text-slate-300 space-y-1">
+            <div className="text-slate-500 mb-1">2. Permit2 Tokens (and NFT contracts as Entrypoints)</div>
+            {getWorldChainPermit2Tokens().map((token) => (
+              <div key={token.address} className="font-mono break-all text-[11px] text-slate-400">
+                {token.symbol}: {token.address}
+              </div>
+            ))}
           </div>
-          <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#141722]">
-            <span className="text-slate-400">Signer Address</span>
-            <span className="font-mono text-slate-300 text-[11px]">0x3D599...04707</span>
-          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(getWorldPortalAllowlistText());
+                setCopiedAllowlist(true);
+                setTimeout(() => setCopiedAllowlist(false), 2000);
+              } catch {
+                // Ignore
+              }
+            }}
+            className="w-full py-2.5 rounded-xl bg-[#1A1E2B] hover:bg-[#22283A] text-slate-300 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+          >
+            {copiedAllowlist ? <Check className="w-3.5 h-3.5 text-[#00F293]" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copiedAllowlist ? "Copied allowlist" : "Copy all addresses"}</span>
+          </button>
+          <a
+            href="https://developer.world.org"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#00F293] hover:underline flex items-center gap-1"
+          >
+            <span>Open Developer Portal</span>
+            <ExternalLink className="w-3 h-3" />
+          </a>
         </div>
       </div>
 

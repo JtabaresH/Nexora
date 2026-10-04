@@ -6,6 +6,7 @@ import { BlockchainClient } from "../blockchain/viem-client";
 import { KNOWN_TOKENS_WORLD_CHAIN, KNOWN_TOKENS_SEPOLIA, KNOWN_TOKENS_OPTIMISM } from "@/config/contracts";
 import { PricingService } from "../pricing/pricing-service";
 import { CustomTokenService } from "../tokens/custom-tokens";
+import { DiscoveredToken } from "../tokens/token-indexer";
 
 export class OnChainAssetProvider implements AssetProvider {
   async getTokens(address: string, chainId: number): Promise<Token[]> {
@@ -22,19 +23,39 @@ export class OnChainAssetProvider implements AssetProvider {
 
     // 1. Merge with any user-imported custom tokens
     const customConfigs = CustomTokenService.getCustomTokens(chainId);
+    const discovered = await this.fetchDiscoveredTokens(address, chainId);
     const allConfigs = [...baseConfigs, ...customConfigs];
 
+    const knownAddresses = new Set(allConfigs.map((c) => c.address.toLowerCase()));
+    const discoveredConfigs = discovered
+      .filter((token) => !knownAddresses.has(token.address.toLowerCase()))
+      .map((token) => ({
+        address: token.address,
+        name: token.name,
+        symbol: token.symbol,
+        decimals: token.decimals,
+        logoUrl: token.logoUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${token.symbol}`,
+        chainId,
+      }));
+
+    const mergedConfigs = [...allConfigs, ...discoveredConfigs];
+    const discoveredBalance = new Map(
+      discovered.map((token) => [token.address.toLowerCase(), BigInt(token.balance)])
+    );
+
     // 2. Fetch live real-time market prices from DexScreener & DefiLlama
-    await PricingService.fetchLivePrices(allConfigs);
+    await PricingService.fetchLivePrices(mergedConfigs);
 
     // 3. Query on-chain balances in parallel
     const tokens: Token[] = await Promise.all(
-      allConfigs.map(async (config) => {
+      mergedConfigs.map(async (config) => {
         let balance = BigInt(0);
 
         try {
           if (config.isNative) {
             balance = await BlockchainClient.getNativeBalance(address, chainId);
+          } else if (discoveredBalance.has(config.address.toLowerCase())) {
+            balance = discoveredBalance.get(config.address.toLowerCase())!;
           } else {
             balance = await BlockchainClient.getErc20Balance(config.address, address, chainId);
           }
@@ -88,6 +109,30 @@ export class OnChainAssetProvider implements AssetProvider {
     });
 
     return tokens;
+  }
+
+  private async fetchDiscoveredTokens(
+    address: string,
+    chainId: number
+  ): Promise<DiscoveredToken[]> {
+    try {
+      const res = await fetch(
+        `/api/tokens?address=${encodeURIComponent(address)}&chainId=${chainId}`,
+        {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(15000),
+        }
+      );
+
+      if (!res.ok) return [];
+
+      const data = await res.json();
+      if (!data.tokens || !Array.isArray(data.tokens)) return [];
+      return data.tokens as DiscoveredToken[];
+    } catch (err) {
+      console.warn("Failed to fetch discovered tokens:", err);
+      return [];
+    }
   }
 
   async getNFTs(address: string, chainId: number): Promise<NFT[]> {

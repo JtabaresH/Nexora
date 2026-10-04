@@ -1,3 +1,5 @@
+import { PERMIT2_ADDRESS } from "@/contracts/abis/permit2";
+
 export interface KnownTokenConfig {
   address: string;
   name: string;
@@ -58,6 +60,30 @@ export const KNOWN_TOKENS_WORLD_CHAIN: KnownTokenConfig[] = [
     logoUrl: "https://api.dicebear.com/7.x/identicon/svg?seed=WARMY",
     chainId: 480,
   },
+  {
+    address: "0xcd1E32B86953D79a6AC58e813D2EA7a1790cAb63",
+    name: "ORO",
+    symbol: "ORO",
+    decimals: 18,
+    logoUrl: "https://api.dicebear.com/7.x/identicon/svg?seed=ORO",
+    chainId: 480,
+  },
+  {
+    address: "0x1C60ba0A0eD1019e8Eb035E6daF4155A5cE2380B",
+    name: "EURC",
+    symbol: "EURC",
+    decimals: 6,
+    logoUrl: "https://api.dicebear.com/7.x/identicon/svg?seed=EURC",
+    chainId: 480,
+  },
+  {
+    address: "0x859dbe24b90c9f2f7742083d3cf59ca41f55be5d",
+    name: "Savings Dai",
+    symbol: "sDAI",
+    decimals: 18,
+    logoUrl: "https://api.dicebear.com/7.x/identicon/svg?seed=sDAI",
+    chainId: 480,
+  },
 ];
 
 export const KNOWN_TOKENS_SEPOLIA: KnownTokenConfig[] = [
@@ -87,6 +113,19 @@ export const KNOWN_TOKENS_SEPOLIA: KnownTokenConfig[] = [
     isNative: true,
   },
 ];
+
+export const WORLD_PERMIT2_ADDRESS = PERMIT2_ADDRESS;
+
+export function getWorldChainPermit2Tokens(): KnownTokenConfig[] {
+  return KNOWN_TOKENS_WORLD_CHAIN.filter((token) => !token.isNative);
+}
+
+export function getWorldPortalAllowlistText(): string {
+  const tokens = getWorldChainPermit2Tokens()
+    .map((token) => `${token.symbol}\t${token.address}`)
+    .join("\n");
+  return `Permit2 (Contract Entrypoint)\n${PERMIT2_ADDRESS}\n\nPermit2 Tokens / Contract Entrypoints\n${tokens}`;
+}
 
 export const KNOWN_TOKENS_OPTIMISM: KnownTokenConfig[] = [
   {

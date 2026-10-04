@@ -7,9 +7,7 @@ import { NFT } from "@/types/nft";
 import { Transaction } from "@/types/transaction";
 import { WorldMiniKitService } from "@/services/world/minikit";
 import { ContractEncoder } from "@/contracts/encoder";
-import { erc20Abi } from "@/contracts/abis/erc20";
-import { erc721Abi } from "@/contracts/abis/erc721";
-import { erc1155Abi } from "@/contracts/abis/erc1155";
+import { PERMIT2_ADDRESS } from "@/contracts/abis/permit2";
 import { useDemoMode } from "./DemoModeContext";
 import { useNetwork } from "./NetworkContext";
 import { BlockchainClient } from "@/services/blockchain/viem-client";
@@ -291,7 +289,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // If in World App: use MiniKit sendTransaction
       try {
         if (token.isNative) {
-          // Native ETH transfer — World App displays value automatically
+          // Native ETH transfer via sendTransaction to the recipient
           const result = await WorldMiniKitService.executeSendTransaction({
             chainId,
             transactions: [
@@ -304,7 +302,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           });
 
           if (result.success && result.transactionHash) {
-            updateTransactionStatus(result.transactionHash, "CONFIRMED");
+            updateTransactionStatus(txHash, "CONFIRMED");
             return { success: true, hash: result.transactionHash };
           } else {
             const errMsg = result.error || "Transaction was rejected in World App";
@@ -312,24 +310,37 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return { success: false, error: errMsg };
           }
         } else {
-          // ERC-20 transfer — pass ABI info so World App shows readable details
-          const calldata = ContractEncoder.encodeErc20Transfer(recipient, amount);
+          // ERC-20 via Permit2 AllowanceTransfer so MiniKit does not call the
+          // token contract as an entrypoint (avoids invalid_contract).
+          const permitAmount = ContractEncoder.toPermit2Amount(amount);
+          const approveData = ContractEncoder.encodePermit2Approve(
+            token.address,
+            account.address,
+            permitAmount
+          );
+          const transferData = ContractEncoder.encodePermit2TransferFrom(
+            account.address,
+            recipient,
+            permitAmount,
+            token.address
+          );
 
           const result = await WorldMiniKitService.executeSendTransaction({
             chainId,
             transactions: [
               {
-                address: token.address as `0x${string}`,
-                abi: erc20Abi,
-                functionName: "transfer",
-                args: [recipient, amount.toString()],
-                data: calldata,
+                address: PERMIT2_ADDRESS,
+                data: approveData,
+              },
+              {
+                address: PERMIT2_ADDRESS,
+                data: transferData,
               },
             ],
           });
 
           if (result.success && result.transactionHash) {
-            updateTransactionStatus(result.transactionHash, "CONFIRMED");
+            updateTransactionStatus(txHash, "CONFIRMED");
             return { success: true, hash: result.transactionHash };
           } else {
             const errMsg = result.error || "Transaction was rejected in World App";
@@ -397,12 +408,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       }
 
-      // Live World App execution
+      // Live World App execution via MiniKit sendTransaction
       try {
         let calldata: `0x${string}`;
-        let txAbi: readonly unknown[];
-        let txFunctionName: string;
-        let txArgs: readonly unknown[];
 
         if (nft.standard === "ERC721") {
           calldata = ContractEncoder.encodeErc721Transfer(
@@ -410,9 +418,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             recipient,
             BigInt(nft.tokenId)
           );
-          txAbi = erc721Abi;
-          txFunctionName = "safeTransferFrom";
-          txArgs = [account.address, recipient, nft.tokenId];
         } else {
           calldata = ContractEncoder.encodeErc1155Transfer(
             account.address,
@@ -420,9 +425,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             BigInt(nft.tokenId),
             quantity
           );
-          txAbi = erc1155Abi;
-          txFunctionName = "safeTransferFrom";
-          txArgs = [account.address, recipient, nft.tokenId, quantity.toString(), "0x"];
         }
 
         const result = await WorldMiniKitService.executeSendTransaction({
@@ -430,16 +432,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           transactions: [
             {
               address: nft.contractAddress as `0x${string}`,
-              abi: txAbi,
-              functionName: txFunctionName,
-              args: txArgs,
               data: calldata,
             },
           ],
         });
 
         if (result.success && result.transactionHash) {
-          updateTransactionStatus(result.transactionHash, "CONFIRMED");
+          updateTransactionStatus(txHash, "CONFIRMED");
           return { success: true, hash: result.transactionHash };
         } else {
           const errMsg = result.error || "NFT Transfer was rejected in World App";
