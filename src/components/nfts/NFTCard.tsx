@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { NFT } from "@/types/nft";
-import Image from "next/image";
 import { Send, Eye, Lock } from "lucide-react";
-import { MetadataService } from "@/services/metadata/metadata-service";
 import { useNFTTransferability } from "@/hooks/useNFTTransferability";
+import { NFTImage } from "@/components/nfts/NFTImage";
 
 interface NFTCardProps {
   nft: NFT;
@@ -18,12 +17,8 @@ export const NFTCard: React.FC<NFTCardProps> = ({
   onViewDetails,
   onSend,
 }) => {
-  const [imageError, setImageError] = useState(false);
   const { transferability } = useNFTTransferability(nft);
   const nonTransferable = transferability.status === "non_transferable";
-
-  const fallback = MetadataService.getFallbackImage(nft.tokenId, nft.name);
-  const displayImage = imageError || !nft.imageUrl ? fallback : nft.imageUrl;
 
   return (
     <div className="rounded-2xl overflow-hidden bg-[#11131A] border border-[#1E2230] flex flex-col justify-between group hover:border-[#2F364C] transition-all">
@@ -32,14 +27,12 @@ export const NFTCard: React.FC<NFTCardProps> = ({
         className="relative aspect-square w-full overflow-hidden bg-[#181B26] cursor-pointer"
         onClick={() => onViewDetails(nft)}
       >
-        <Image
-          src={displayImage}
+        <NFTImage
+          nft={nft}
           alt={nft.name || `Token #${nft.tokenId}`}
           fill
           sizes="(max-width: 430px) 50vw, 200px"
           className="object-cover group-hover:scale-105 transition-transform duration-300"
-          onError={() => setImageError(true)}
-          unoptimized
         />
 
         {/* Standard Badge (ERC-721 / ERC-1155) */}

@@ -3,12 +3,11 @@
 import React, { useState } from "react";
 import { NFT } from "@/types/nft";
 import { Modal } from "../common/Modal";
-import { MetadataService } from "@/services/metadata/metadata-service";
 import { BlockchainClient } from "@/services/blockchain/viem-client";
 import { getNetworkConfig } from "@/config/networks";
-import Image from "next/image";
-import { Send, Copy, Check, ExternalLink, ShieldCheck } from "lucide-react";
+import { Send, Copy, Check } from "lucide-react";
 import { useNFTTransferability } from "@/hooks/useNFTTransferability";
+import { NFTImage } from "@/components/nfts/NFTImage";
 
 interface NFTDetailModalProps {
   nft: NFT | null;
@@ -25,15 +24,12 @@ export const NFTDetailModal: React.FC<NFTDetailModalProps> = ({
 }) => {
   const [copiedContract, setCopiedContract] = useState(false);
   const [copiedOwner, setCopiedOwner] = useState(false);
-  const [imgError, setImgError] = useState(false);
   const { transferability } = useNFTTransferability(nft ?? undefined);
 
   if (!nft) return null;
 
   const nonTransferable = transferability.status === "non_transferable";
   const chain = getNetworkConfig(nft.chainId);
-  const fallback = MetadataService.getFallbackImage(nft.tokenId, nft.name);
-  const displayImage = imgError || !nft.imageUrl ? fallback : nft.imageUrl;
 
   const handleCopyContract = async () => {
     try {
@@ -61,13 +57,11 @@ export const NFTDetailModal: React.FC<NFTDetailModalProps> = ({
       <div className="space-y-5">
         {/* NFT Image View */}
         <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-[#181B26] border border-[#22283A] shadow-md">
-          <Image
-            src={displayImage}
+          <NFTImage
+            nft={nft}
             alt={nft.name || "NFT Image"}
             fill
             className="object-cover"
-            onError={() => setImgError(true)}
-            unoptimized
           />
           <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md text-xs font-bold text-white border border-white/10">
             {nft.standard}

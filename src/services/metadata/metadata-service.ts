@@ -15,8 +15,8 @@ export interface RawNFTMetadata {
 export class MetadataService {
   private static readonly IPFS_GATEWAYS = [
     "https://ipfs.io/ipfs/",
-    "https://cloudflare-ipfs.com/ipfs/",
     "https://gateway.pinata.cloud/ipfs/",
+    "https://dweb.link/ipfs/",
   ];
 
   private static readonly ARWEAVE_GATEWAY = "https://arweave.net/";
@@ -36,13 +36,10 @@ export class MetadataService {
 
     // IPFS resolution
     if (trimmed.startsWith("ipfs://")) {
-      const path = trimmed.replace(/^ipfs:\/\/?/, "");
+      const path = trimmed
+        .replace(/^ipfs:\/\//i, "")
+        .replace(/^ipfs\//i, "");
       return `${this.IPFS_GATEWAYS[0]}${path}`;
-    }
-
-    if (trimmed.includes("/ipfs/")) {
-      const parts = trimmed.split("/ipfs/");
-      return `${this.IPFS_GATEWAYS[0]}${parts[1]}`;
     }
 
     // Arweave resolution
@@ -62,6 +59,34 @@ export class MetadataService {
     }
 
     return trimmed;
+  }
+
+  static expandErc1155Uri(uri: string, tokenId: string): string {
+    if (!uri.includes("{id}")) return uri;
+
+    const hexTokenId = BigInt(tokenId).toString(16).padStart(64, "0");
+    return uri.replace(/\{id\}/g, hexTokenId);
+  }
+
+  static getImageCandidates(url: string | undefined): string[] {
+    if (!url) return [];
+
+    const resolved = this.resolveUri(url);
+    if (!resolved) return [];
+
+    const match = resolved.match(/\/ipfs\/([^?#]+)([?#].*)?$/i);
+    if (!match) return [resolved];
+
+    const ipfsPath = match[1].replace(/^\/+/, "");
+    if (!ipfsPath) return [resolved];
+
+    const suffix = match[2] || "";
+    return Array.from(
+      new Set([
+        resolved,
+        ...this.IPFS_GATEWAYS.map((gateway) => `${gateway}${ipfsPath}${suffix}`),
+      ])
+    );
   }
 
   /**
@@ -122,8 +147,8 @@ export class MetadataService {
       tokenUri,
     } = params;
 
-    let resolvedName = rawMetadata?.name?.trim() || `Token #${tokenId}`;
-    let resolvedDescription = rawMetadata?.description?.trim() || "";
+    const resolvedName = rawMetadata?.name?.trim() || `Token #${tokenId}`;
+    const resolvedDescription = rawMetadata?.description?.trim() || "";
 
     // Normalize image source
     const rawImage =

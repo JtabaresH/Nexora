@@ -1,5 +1,9 @@
 import { NFT, NFTStandard } from "@/types/nft";
-import { MetadataService } from "../metadata/metadata-service";
+import { getExplorerApiUrl } from "@/config/networks";
+import {
+  MetadataService,
+  type RawNFTMetadata,
+} from "../metadata/metadata-service";
 import { BlockchainClient } from "../blockchain/viem-client";
 import { erc721Abi } from "@/contracts/abis/erc721";
 import { erc1155Abi } from "@/contracts/abis/erc1155";
@@ -43,7 +47,7 @@ interface AlchemyOwnedNFT {
 }
 
 /**
- * Worldscan/Etherscan ERC-721 transfer event
+ * Blockscout token transfer response
  */
 interface EtherscanTokenTransfer {
   contractAddress: string;
@@ -52,6 +56,15 @@ interface EtherscanTokenTransfer {
   tokenSymbol: string;
   from: string;
   to: string;
+  tokenValue?: string;
+}
+
+interface ExplorerOwnedNFT {
+  contractAddress: string;
+  tokenId: string;
+  standard: NFTStandard;
+  fallbackName?: string;
+  quantity?: bigint;
 }
 
 /**
@@ -70,18 +83,13 @@ export interface KnownNFTContract {
  *
  * Multi-strategy NFT discovery:
  * 1. Alchemy NFT API (preferred - comprehensive, metadata included)
- * 2. Worldscan/Etherscan token transfer API (fallback - discovers NFTs by transfer events)
+ * 2. Blockscout token transfer API (fallback - discovers NFTs by transfer events)
  * 3. Direct RPC for known/imported contracts (fallback - limited to known addresses)
  */
 export class NFTIndexerService {
   private static readonly ALCHEMY_BASE_URLS: Record<number, string> = {
     480: "https://worldchain-mainnet.g.alchemy.com/nft/v3",
     4801: "https://worldchain-sepolia.g.alchemy.com/nft/v3",
-  };
-
-  private static readonly WORLDSCAN_API_URLS: Record<number, string> = {
-    480: "https://api.worldscan.org/api",
-    4801: "https://api-sepolia.worldscan.org/api",
   };
 
   /**
@@ -122,24 +130,19 @@ export class NFTIndexerService {
           nft.image?.originalUrl ||
           nft.image?.thumbnailUrl ||
           nft.image?.pngUrl;
+        const rawMetadata = nft.raw?.metadata as RawNFTMetadata | undefined;
 
         return MetadataService.normalizeNFT({
           contractAddress: nft.contract.address,
           tokenId: nft.tokenId,
           standard,
           chainId,
-          rawMetadata: nft.raw?.metadata
-            ? {
-                name: nft.name,
-                description: nft.description,
-                image: imageUrl,
-                ...(nft.raw.metadata as Record<string, unknown>),
-              }
-            : {
-                name: nft.name,
-                description: nft.description,
-                image: imageUrl,
-              },
+          rawMetadata: {
+            ...rawMetadata,
+            name: nft.name ?? rawMetadata?.name,
+            description: nft.description ?? rawMetadata?.description,
+            ...(imageUrl ? { image: imageUrl } : {}),
+          },
           quantity: standard === "ERC1155" ? BigInt(nft.balance || "1") : BigInt(1),
           collectionName:
             nft.contract.openSeaMetadata?.collectionName || nft.contract.name,
@@ -154,115 +157,110 @@ export class NFTIndexerService {
   }
 
   /**
-   * Fallback strategy: Worldscan/Etherscan token transfer API
+   * Fallback strategy: Blockscout token transfer API
    * Discovers ERC-721 and ERC-1155 tokens by scanning transfer events to the owner
    */
-  static async fetchFromWorldscan(
+  static async fetchFromExplorer(
     ownerAddress: string,
     chainId: number
   ): Promise<NFT[]> {
-    const apiUrl = this.WORLDSCAN_API_URLS[chainId];
+    const apiUrl = getExplorerApiUrl(chainId);
     if (!apiUrl) return [];
 
-    const discoveredNFTs: NFT[] = [];
+    const fetchTransfers = async (
+      action: "tokennfttx" | "token1155tx"
+    ): Promise<EtherscanTokenTransfer[]> => {
+      const url = `${apiUrl}?module=account&action=${action}&address=${ownerAddress}&startblock=0&endblock=99999999&sort=desc`;
+      try {
+        const response = await fetch(url, {
+          signal: AbortSignal.timeout(6000),
+        });
+        if (!response.ok) return [];
 
-    try {
-      // 1. Fetch ERC-721 transfers TO the owner
-      const erc721Url = `${apiUrl}?module=account&action=tokennfttx&address=${ownerAddress}&startblock=0&endblock=99999999&sort=desc`;
-      const erc721Res = await fetch(erc721Url, {
-        signal: AbortSignal.timeout(6000),
-      });
-
-      if (erc721Res.ok) {
-        const erc721Data = await erc721Res.json();
-        if (erc721Data.status === "1" && Array.isArray(erc721Data.result)) {
-          // Track ownership: NFTs received minus NFTs sent
-          const ownershipMap = new Map<string, EtherscanTokenTransfer>();
-
-          for (const tx of erc721Data.result as EtherscanTokenTransfer[]) {
-            const key = `${tx.contractAddress.toLowerCase()}-${tx.tokenID}`;
-            if (tx.to.toLowerCase() === ownerAddress.toLowerCase()) {
-              ownershipMap.set(key, tx);
-            } else if (tx.from.toLowerCase() === ownerAddress.toLowerCase()) {
-              ownershipMap.delete(key);
-            }
-          }
-
-          // For each owned token, fetch metadata
-          for (const [, tx] of ownershipMap) {
-            const nft = await this.enrichNFTFromRPC(
-              tx.contractAddress,
-              tx.tokenID,
-              "ERC721",
-              chainId,
-              ownerAddress,
-              tx.tokenName
-            );
-            if (nft) discoveredNFTs.push(nft);
-          }
-        }
+        const data: { result?: unknown } = await response.json();
+        return Array.isArray(data.result)
+          ? (data.result as EtherscanTokenTransfer[])
+          : [];
+      } catch (err) {
+        console.warn(`Blockscout ${action} fetch warning:`, err);
+        return [];
       }
-    } catch (err) {
-      console.warn("Worldscan ERC-721 fetch warning:", err);
+    };
+
+    const [erc721Transfers, erc1155Transfers] = await Promise.all([
+      fetchTransfers("tokennfttx"),
+      fetchTransfers("token1155tx"),
+    ]);
+    const ownedItems: ExplorerOwnedNFT[] = [];
+    const normalizedOwner = ownerAddress.toLowerCase();
+
+    // Track ERC-721 ownership from transfer events.
+    const ownershipMap = new Map<string, EtherscanTokenTransfer>();
+    for (const tx of erc721Transfers) {
+      const key = `${tx.contractAddress.toLowerCase()}-${tx.tokenID}`;
+      if (tx.to.toLowerCase() === normalizedOwner) {
+        ownershipMap.set(key, tx);
+      } else if (tx.from.toLowerCase() === normalizedOwner) {
+        ownershipMap.delete(key);
+      }
+    }
+    for (const tx of ownershipMap.values()) {
+      ownedItems.push({
+        contractAddress: tx.contractAddress,
+        tokenId: tx.tokenID,
+        standard: "ERC721",
+        fallbackName: tx.tokenName,
+      });
     }
 
-    try {
-      // 2. Fetch ERC-1155 transfers TO the owner
-      const erc1155Url = `${this.WORLDSCAN_API_URLS[chainId]}?module=account&action=token1155tx&address=${ownerAddress}&startblock=0&endblock=99999999&sort=desc`;
-      const erc1155Res = await fetch(erc1155Url, {
-        signal: AbortSignal.timeout(6000),
-      });
+    // Track net ERC-1155 balances per token.
+    const balanceMap = new Map<
+      string,
+      { contract: string; tokenId: string; name: string; balance: bigint }
+    >();
+    for (const tx of erc1155Transfers) {
+      const key = `${tx.contractAddress.toLowerCase()}-${tx.tokenID}`;
+      const existing = balanceMap.get(key) || {
+        contract: tx.contractAddress,
+        tokenId: tx.tokenID,
+        name: tx.tokenName || "",
+        balance: BigInt(0),
+      };
 
-      if (erc1155Res.ok) {
-        const erc1155Data = await erc1155Res.json();
-        if (erc1155Data.status === "1" && Array.isArray(erc1155Data.result)) {
-          // Track net balance per token
-          const balanceMap = new Map<
-            string,
-            { contract: string; tokenId: string; name: string; balance: bigint }
-          >();
-
-          for (const tx of erc1155Data.result) {
-            const key = `${tx.contractAddress.toLowerCase()}-${tx.tokenID}`;
-            const existing = balanceMap.get(key) || {
-              contract: tx.contractAddress,
-              tokenId: tx.tokenID,
-              name: tx.tokenName || "",
-              balance: BigInt(0),
-            };
-
-            const amount = BigInt(tx.tokenValue || "1");
-            if (tx.to.toLowerCase() === ownerAddress.toLowerCase()) {
-              existing.balance += amount;
-            } else if (tx.from.toLowerCase() === ownerAddress.toLowerCase()) {
-              existing.balance -= amount;
-            }
-
-            balanceMap.set(key, existing);
-          }
-
-          // Filter to tokens still owned (positive balance)
-          for (const [, item] of balanceMap) {
-            if (item.balance <= BigInt(0)) continue;
-
-            const nft = await this.enrichNFTFromRPC(
-              item.contract,
-              item.tokenId,
-              "ERC1155",
-              chainId,
-              ownerAddress,
-              item.name,
-              item.balance
-            );
-            if (nft) discoveredNFTs.push(nft);
-          }
-        }
+      const amount = BigInt(tx.tokenValue || "1");
+      if (tx.to.toLowerCase() === normalizedOwner) {
+        existing.balance += amount;
+      } else if (tx.from.toLowerCase() === normalizedOwner) {
+        existing.balance -= amount;
       }
-    } catch (err) {
-      console.warn("Worldscan ERC-1155 fetch warning:", err);
+
+      balanceMap.set(key, existing);
+    }
+    for (const item of balanceMap.values()) {
+      if (item.balance <= BigInt(0)) continue;
+      ownedItems.push({
+        contractAddress: item.contract,
+        tokenId: item.tokenId,
+        standard: "ERC1155",
+        fallbackName: item.name,
+        quantity: item.balance,
+      });
     }
 
-    return discoveredNFTs;
+    const enriched = await Promise.all(
+      ownedItems.slice(0, 50).map((item) =>
+        this.enrichNFTFromRPC(
+          item.contractAddress,
+          item.tokenId,
+          item.standard,
+          chainId,
+          ownerAddress,
+          item.fallbackName,
+          item.quantity
+        )
+      )
+    );
+    return enriched.filter((nft): nft is NFT => nft !== null);
   }
 
   /**
@@ -307,6 +305,9 @@ export class NFTIndexerService {
           BigInt(tokenId),
           chainId
         );
+        if (tokenUri) {
+          tokenUri = MetadataService.expandErc1155Uri(tokenUri, tokenId);
+        }
       }
 
       // Fetch remote metadata JSON
